@@ -39,8 +39,7 @@ GLfloat lastFrame = 0.0f;
 GLfloat lastX = 400, lastY = 300;
 
 bool firstMouse = true;
-
-glm::vec3 lightPos(0.5f, 1.0f, 0.3f);
+bool bumpMap_ON = true;
 
 int main()
 {
@@ -101,24 +100,33 @@ int main()
 		glm::mat4 projection = glm::perspective(camera.Zoom, (float)WIDTH / (float)HEIGHT, 0.1f, 100.0f);
 		glm::mat4 view = camera.GetViewMatrix();
 		shader.use();
+		shader.setVec3("viewPos", camera.Position);
+		shader.setVec3("lightPos", camera.Position);
+		shader.setVec3("direction", camera.Front);
+		shader.setFloat("light.cutOff", glm::cos(glm::radians(12.5f)));
+		shader.setFloat("light.outerCutOff", glm::cos(glm::radians(17.5f)));
+		shader.setFloat("constant", 1.0f);
+		shader.setFloat("linear", 0.09f);
+		shader.setFloat("quadratic", 0.032f);
 		shader.setMat4("projection", projection);
 		shader.setMat4("view", view);
 
 		// world transformation
 		glm::mat4 model;
-		model = glm::rotate(model, glm::radians((float)glfwGetTime() * -10.0f), glm::normalize(glm::vec3(1.0, 0.0, 1.0)));
 		shader.setMat4("model", model);
-		shader.setVec3("viewPos", camera.Position);
-		shader.setVec3("lightPos", lightPos);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, diffuseMap);
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, normalMap);
+
+		if(bumpMap_ON) shader.setInt("normalMap", 1);
+		else shader.setInt("normalMap", 0);
+
 		renderQuad();
 
 		model = glm::mat4();
-		model = glm::translate(model, lightPos);
-		model = glm::scale(model, glm::vec3(0.1f));
+		/*model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
+		model = glm::scale(model, glm::vec3(0.1f));*/
 		shader.setMat4("model", model);
 		renderQuad();
 
@@ -141,6 +149,11 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		keys[key] = true;
 	else if (action == GLFW_RELEASE)
 		keys[key] = false;
+
+	if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+		if (bumpMap_ON) bumpMap_ON = false;
+		else bumpMap_ON = true;
+	}
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {

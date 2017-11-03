@@ -14,7 +14,14 @@ uniform sampler2D diffuseMap;
 uniform sampler2D normalMap;
 
 uniform vec3 lightPos;
+uniform vec3 direction;
+uniform float cutOff;
+uniform float outerCutOff;
 uniform vec3 viewPos;
+
+uniform float constant;
+uniform float linear;
+uniform float quadratic;
 
 void main(){
     vec3 normal = texture(normalMap, fs_in.TexCoords).rgb;
@@ -34,6 +41,20 @@ void main(){
     vec3 halfwayDir = normalize(lightDir + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0), 32.0);
 
+    float theta = dot(lightDir, normalize(-direction));
+    float epsilon = (cutOff - outerCutOff);
+    float intensity = clamp((theta - outerCutOff) / epsilon, 0.0, 1.0);
+    diffuse *= intensity;
+
     vec3 specular = vec3(0.2) * spec;
+    specular *= intensity;
+
+    float distance = length(fs_in.TangentLightPos - fs_in.FragPos);
+    float attenuation = 1.0 / (constant  + linear * distance + quadratic * (distance * distance));
+
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+
     FragColor = vec4(ambient + diffuse + specular, 1.0);
 }
