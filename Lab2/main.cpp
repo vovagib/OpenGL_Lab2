@@ -18,7 +18,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <assimp/Importer.hpp>
 
 // Function prototypes
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -27,19 +26,25 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void do_movement();
 unsigned int loadTexture(const char *path);
 void renderQuad();
+unsigned char generateNormalMap(unsigned char *data, int width, int height);
 
 // Window dimensions
 Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
-const GLuint WIDTH = 800, HEIGHT = 600;
+const GLuint WIDTH = 1280, HEIGHT = 720;
 
 bool keys[1024];
 
 GLfloat deltaTime = 0.0f;
 GLfloat lastFrame = 0.0f;
-GLfloat lastX = 400, lastY = 300;
+GLfloat lastX = WIDTH/2, lastY = HEIGHT/2;
 
 bool firstMouse = true;
 bool bumpMap_ON = true;
+
+float heightScale = 0.1f;
+
+unsigned char* normalMap;
+GLuint NM;
 
 int main()
 {
@@ -72,15 +77,19 @@ int main()
 	// OpenGL options
 	glEnable(GL_DEPTH_TEST);
 
-	Shader shader("Shaders/textures.vs",
-		"Shaders/textures.frag");
+	Shader shader("textures.vs",
+		"textures.frag");
 	
-	unsigned int diffuseMap = loadTexture("awesomeface.png");
-	unsigned int normalMap = loadTexture("NormalMap.png");
+	unsigned int diffuseMap = loadTexture("bricks2.jpg");
+	//unsigned int normalMap = loadTexture("bricks2_normal.jpg");
+	unsigned int heightMap = loadTexture("bricks2_disp.jpg");
 
 	shader.use();
 	shader.setInt("diffuseMap", 0);
 	shader.setInt("normalMap", 1);
+	shader.setInt("depthMap", 2);
+
+	glm::vec3 lightPos(-0.3f, 1.0f, 1.0f);
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -100,33 +109,28 @@ int main()
 		glm::mat4 projection = glm::perspective(camera.Zoom, (float)WIDTH / (float)HEIGHT, 0.1f, 100.0f);
 		glm::mat4 view = camera.GetViewMatrix();
 		shader.use();
-		shader.setVec3("viewPos", camera.Position);
-		shader.setVec3("lightPos", camera.Position);
-		shader.setVec3("direction", camera.Front);
-		shader.setFloat("light.cutOff", glm::cos(glm::radians(12.5f)));
-		shader.setFloat("light.outerCutOff", glm::cos(glm::radians(17.5f)));
-		shader.setFloat("constant", 1.0f);
-		shader.setFloat("linear", 0.09f);
-		shader.setFloat("quadratic", 0.032f);
 		shader.setMat4("projection", projection);
 		shader.setMat4("view", view);
-
-		// world transformation
+		// render parallax-mapped quad
 		glm::mat4 model;
+		//model = glm::rotate(model, glm::radians((float)glfwGetTime() * -10.0f), glm::normalize(glm::vec3(1.0, 0.0, 1.0))); // rotate the quad to show parallax mapping from multiple directions
 		shader.setMat4("model", model);
+		shader.setVec3("viewPos", camera.Position);
+		shader.setVec3("lightPos", lightPos);
+		shader.setFloat("heightScale", heightScale); // adjust with Q and E keys
+		std::cout << heightScale << std::endl;
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, diffuseMap);
 		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, normalMap);
-
-		if(bumpMap_ON) shader.setInt("normalMap", 1);
-		else shader.setInt("normalMap", 0);
-
+		glBindTexture(GL_TEXTURE_2D, NM);
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, heightMap);
 		renderQuad();
 
+		// render light source (simply re-renders a smaller plane at the light's position for debugging/visualization)
 		model = glm::mat4();
-		/*model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
-		model = glm::scale(model, glm::vec3(0.1f));*/
+		model = glm::translate(model, lightPos);
+		model = glm::scale(model, glm::vec3(0.1f));
 		shader.setMat4("model", model);
 		renderQuad();
 
@@ -150,9 +154,19 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	else if (action == GLFW_RELEASE)
 		keys[key] = false;
 
-	if (key == GLFW_KEY_F && action == GLFW_PRESS) {
-		if (bumpMap_ON) bumpMap_ON = false;
-		else bumpMap_ON = true;
+	if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+	{
+		if (heightScale > 0.0f)
+			heightScale -= 0.0005f;
+		else
+			heightScale = 0.0f;
+	}
+	else if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+	{
+		if (heightScale < 1.0f)
+			heightScale += 0.0005f;
+		else
+			heightScale = 1.0f;
 	}
 }
 
@@ -191,12 +205,25 @@ void do_movement() {
 
 unsigned int loadTexture(const char *path) {
 	unsigned int textureID;
-	glGenTextures(1, &textureID);
+	
 
 	int width, height, nrComponents;
 	unsigned char *data = stbi_load(path, &width, &height, &nrComponents, 0);
+	if (path == "bricks2_disp.jpg") {
+		generateNormalMap(data, width, height);
+		glGenTextures(1, &NM);
+		glBindTexture(GL_TEXTURE_2D, NM);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, normalMap);
+		glGenerateMipmap(GL_TEXTURE_2D);
 
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+	//float f = bla(data, width, height, 1, 1);
 	if (data) {
+		glGenTextures(1, &textureID);
 		GLenum format;
 		if (nrComponents == 1)
 			format = GL_RED;
@@ -209,8 +236,8 @@ unsigned int loadTexture(const char *path) {
 		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
 		glGenerateMipmap(GL_TEXTURE_2D);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, format == GL_RGBA ? GL_CLAMP_TO_EDGE : GL_REPEAT); // for this tutorial: use GL_CLAMP_TO_EDGE to prevent semi-transparent borders. Due to interpolation it takes texels from next repeat 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, format == GL_RGBA ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -226,27 +253,28 @@ unsigned int loadTexture(const char *path) {
 
 unsigned int quadVAO = 0;
 unsigned int quadVBO;
-void renderQuad() {
-	if (quadVAO == 0) {
-		//positions
+void renderQuad()
+{
+	if (quadVAO == 0)
+	{
+		// positions
 		glm::vec3 pos1(-1.0f, 1.0f, 0.0f);
 		glm::vec3 pos2(-1.0f, -1.0f, 0.0f);
 		glm::vec3 pos3(1.0f, -1.0f, 0.0f);
 		glm::vec3 pos4(1.0f, 1.0f, 0.0f);
-
-		//texture coordinates
+		// texture coordinates
 		glm::vec2 uv1(0.0f, 1.0f);
 		glm::vec2 uv2(0.0f, 0.0f);
 		glm::vec2 uv3(1.0f, 0.0f);
 		glm::vec2 uv4(1.0f, 1.0f);
-
-		//normal vector
+		// normal vector
 		glm::vec3 nm(0.0f, 0.0f, 1.0f);
 
+		// calculate tangent/bitangent vectors of both triangles
 		glm::vec3 tangent1, bitangent1;
 		glm::vec3 tangent2, bitangent2;
-
-		//triangle1
+		// triangle 1
+		// ----------
 		glm::vec3 edge1 = pos2 - pos1;
 		glm::vec3 edge2 = pos3 - pos1;
 		glm::vec2 deltaUV1 = uv2 - uv1;
@@ -265,6 +293,7 @@ void renderQuad() {
 		bitangent1 = glm::normalize(bitangent1);
 
 		// triangle 2
+		// ----------
 		edge1 = pos3 - pos1;
 		edge2 = pos4 - pos1;
 		deltaUV1 = uv3 - uv1;
@@ -283,6 +312,7 @@ void renderQuad() {
 		bitangent2.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
 		bitangent2 = glm::normalize(bitangent2);
 
+
 		float quadVertices[] = {
 			// positions            // normal         // texcoords  // tangent                          // bitangent
 			pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
@@ -293,8 +323,7 @@ void renderQuad() {
 			pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
 			pos4.x, pos4.y, pos4.z, nm.x, nm.y, nm.z, uv4.x, uv4.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z
 		};
-
-		//configure plane VAO
+		// configure plane VAO
 		glGenVertexArrays(1, &quadVAO);
 		glGenBuffers(1, &quadVBO);
 		glBindVertexArray(quadVAO);
@@ -311,8 +340,69 @@ void renderQuad() {
 		glEnableVertexAttribArray(4);
 		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(11 * sizeof(float)));
 	}
-
 	glBindVertexArray(quadVAO);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 	glBindVertexArray(0);
+}
+
+unsigned char generateNormalMap(unsigned char *data, int width, int height) {
+	
+	const int w = width;
+	const int h = height;
+
+	normalMap = new unsigned char[3*w*h];
+	
+	float **f = new float*[h];
+	for (int i = 0; i < h; i++)
+		f[i] = new float [w];
+
+	for (int i = 0; i < h; i++) {
+		for (int j = 0; j < w; j++) {
+			f[i][j] = data[3 * (w*j + i)] / 255.0f;
+		}
+	}
+
+	float hx = 1 / w;
+	float hy = 1 / h;
+	float NX, NY, NZ;
+	for (int i = 0; i < h; i++) {
+		for (int j = 0; j < w; j++) {
+			if (j > 0) { // расчет NX
+				if (j < w - 1) {
+					NX = (f[i][j + 1] - f[i][j - 1]) / (2 * hx);
+				}
+				else {
+					NX = (f[i][j] - f[i][j - 1]) / (hx);
+				}
+			}
+			else {
+				NX = (f[i][j + 1] - f[i][j]) / (hx);
+			}
+			NX = -NX;
+
+			if (i > 0) { // расчет NY
+				if (i < h - 1) {
+					NY = (f[i + 1][j] - f[i - 1][j]) / (2 * hy);
+				}
+				else {
+					NY = (f[i][j] - f[i - 1][j]) / (hy);
+				}
+			}
+			else {
+				NY = (f[i + 1][j] - f[i][j]) / (hy);
+			}
+			NY = -NY;
+
+			NZ = 1;
+
+			float l = sqrt(NX*NX + NY*NY + NZ*NZ);
+			NX /= l; NY /= l; NZ /= l;
+
+			normalMap[3 * (w*j + i)] = round((NX + 1)*127.5);
+			normalMap[3 * (w*j + i + 1)] = round((NY + 1)*127.5);
+			normalMap[3 * (w*j + i + 2)] = round((NZ + 1)*127.5);
+		}
+	}
+
+	return 0;
 }
