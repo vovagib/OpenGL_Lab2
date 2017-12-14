@@ -20,14 +20,29 @@ uniform mat4 model;
 uniform vec3 lightPos;
 uniform vec3 viewPos;
 
+uniform bool _isParallax;
+
 void main()
 {
     vs_out.FragPos = vec3(model * vec4(aPos, 1.0));   
     vs_out.TexCoords = aTexCoords;   
     
-    vec3 T = normalize(mat3(model) * aTangent);
-    vec3 B = normalize(mat3(model) * aBitangent);
-    vec3 N = normalize(mat3(model) * aNormal);
+    vec3 T;
+	vec3 N;
+	vec3 B;
+
+    if(!_isParallax){
+    	mat3 normalMatrix = transpose(inverse(mat3(model)));
+    	T = normalize(normalMatrix * aTangent);
+	    N = normalize(normalMatrix * aNormal);
+	    T = normalize(T - dot(T, N) * N);
+		B = cross(N, T);
+    }
+    else{
+	    T = normalize(mat3(model) * aTangent);
+	    B = normalize(mat3(model) * aBitangent);
+	    N = normalize(mat3(model) * aNormal);
+	}
     mat3 TBN = transpose(mat3(T, B, N));
 
     vs_out.TangentLightPos = TBN * lightPos;

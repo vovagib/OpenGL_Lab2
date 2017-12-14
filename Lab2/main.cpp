@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cmath>
 #include <locale>
+#include <string>
 
 #include <stb-master/stb_image.h>
 
@@ -46,6 +47,8 @@ float heightScale = 0.1f;
 unsigned char* normalMap;
 GLuint NM;
 
+bool isParallax = false;
+
 int main()
 {
 	// Init GLFW
@@ -77,11 +80,13 @@ int main()
 	// OpenGL options
 	glEnable(GL_DEPTH_TEST);
 
+	Shader light("light.vs", "light.frag");
 	Shader shader("textures.vs",
 		"textures.frag");
 	
 	unsigned int diffuseMap = loadTexture("bricks2.jpg");
-	//unsigned int normalMap = loadTexture("bricks2_normal.jpg");
+	unsigned int normalMap = loadTexture("bricks2_normal.jpg");
+
 	unsigned int heightMap = loadTexture("bricks2_disp.jpg");
 
 	shader.use();
@@ -89,10 +94,9 @@ int main()
 	shader.setInt("normalMap", 1);
 	shader.setInt("depthMap", 2);
 
-	glm::vec3 lightPos(-0.3f, 1.0f, 1.0f);
-
 	while (!glfwWindowShouldClose(window))
 	{
+		glm::vec3 lightPos = camera.Position;
 		// Calculate deltatime of current frame
 		GLfloat currentFrame = glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
@@ -109,16 +113,33 @@ int main()
 		glm::mat4 projection = glm::perspective(camera.Zoom, (float)WIDTH / (float)HEIGHT, 0.1f, 100.0f);
 		glm::mat4 view = camera.GetViewMatrix();
 		shader.use();
+		shader.setVec3("light.position", camera.Position);
+		shader.setVec3("light.direction", camera.Front);
+		shader.setFloat("light.cutOff", glm::cos(glm::radians(30.0f)));
 		shader.setMat4("projection", projection);
 		shader.setMat4("view", view);
+
+		shader.setBool("isParallax", isParallax);
+		shader.setBool("_isParallax", isParallax);
+		shader.setVec3("light.ambient", 0.1f, 0.1f, 0.1f);
+		// we configure the diffuse intensity slightly higher; the right lighting conditions differ with each lighting method and environment.
+		// each environment and lighting type requires some tweaking to get the best out of your environment.
+		shader.setVec3("light.diffuse", 0.8f, 0.8f, 0.8f);
+		shader.setVec3("light.specular", 0.2f, 0.2f, 0.2f);
+		shader.setFloat("light.constant", 1.0f);
+		shader.setFloat("light.linear", 0.09f);
+		shader.setFloat("light.quadratic", 0.032f);
 		// render parallax-mapped quad
 		glm::mat4 model;
 		//model = glm::rotate(model, glm::radians((float)glfwGetTime() * -10.0f), glm::normalize(glm::vec3(1.0, 0.0, 1.0))); // rotate the quad to show parallax mapping from multiple directions
 		shader.setMat4("model", model);
 		shader.setVec3("viewPos", camera.Position);
-		shader.setVec3("lightPos", lightPos);
+		glm::vec3 bla = camera.Position;
+		//bla.x += 100.0f;
+		//bla.y += 100.0f;
+		//shader.setVec3("lightPos", bla);
 		shader.setFloat("heightScale", heightScale); // adjust with Q and E keys
-		std::cout << heightScale << std::endl;
+		//std::cout << heightScale << std::endl;
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, diffuseMap);
 		glActiveTexture(GL_TEXTURE1);
@@ -128,11 +149,10 @@ int main()
 		renderQuad();
 
 		// render light source (simply re-renders a smaller plane at the light's position for debugging/visualization)
-		model = glm::mat4();
+		/*model = glm::mat4();
 		model = glm::translate(model, lightPos);
 		model = glm::scale(model, glm::vec3(0.1f));
-		shader.setMat4("model", model);
-		renderQuad();
+		shader.setMat4("model", model);*/
 
 		// Swap the screen buffers
 		glfwSwapBuffers(window);
@@ -167,6 +187,11 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			heightScale += 0.0005f;
 		else
 			heightScale = 1.0f;
+	}
+
+	if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
+		if (isParallax) isParallax = false;
+		else isParallax = true;
 	}
 }
 
@@ -358,12 +383,11 @@ unsigned char generateNormalMap(unsigned char *data, int width, int height) {
 
 	for (int i = 0; i < h; i++) {
 		for (int j = 0; j < w; j++) {
-			f[i][j] = data[3 * (w*j + i)] / 255.0f;
+			f[i][j] = data[3 * (w*i + j)] / 255.0f;
 		}
 	}
-
-	float hx = 1 / w;
-	float hy = 1 / h;
+	float hx = 1.0f / w;
+	float hy = 1.0f / h;
 	float NX, NY, NZ;
 	for (int i = 0; i < h; i++) {
 		for (int j = 0; j < w; j++) {
@@ -397,10 +421,14 @@ unsigned char generateNormalMap(unsigned char *data, int width, int height) {
 
 			float l = sqrt(NX*NX + NY*NY + NZ*NZ);
 			NX /= l; NY /= l; NZ /= l;
+			
+			if(i == 10 && j == 412){
+				NX *= 1;
+			}
 
-			normalMap[3 * (w*j + i)] = round((NX + 1)*127.5);
-			normalMap[3 * (w*j + i + 1)] = round((NY + 1)*127.5);
-			normalMap[3 * (w*j + i + 2)] = round((NZ + 1)*127.5);
+			normalMap[3 * (w*i + j)] = round((NX + 1)*127.5);
+			normalMap[3 * (w*i + j) + 1] = round((NY + 1)*127.5);
+			normalMap[3 * (w*i + j) + 2] = round((NZ + 1)*127.5);
 		}
 	}
 
